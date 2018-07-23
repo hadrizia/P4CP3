@@ -23,7 +23,7 @@ library(stringr)
 theme_set(theme_bw())
 ```
 
-## Importando e conhecendo os dados
+## Importando e conhecendo os dados da amostra
 
 ```{r warning=FALSE, message=FALSE}
 ratings <- read.csv(here::here("/data/ratings.csv")) %>% na.omit()
@@ -39,6 +39,7 @@ data <- data %>%
   select(-timestamp)
 
 colnames(data)
+glimpse(data)
 ```
 
 Os dados estão distribuídos nas seguintes colunas:

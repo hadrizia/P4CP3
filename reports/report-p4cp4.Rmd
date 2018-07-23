@@ -1,0 +1,140 @@
+---
+title: 'Inferência: Testes de permutação e p-valores'
+author: "Hadrizia Santos"
+date: "23 de julho de 2018"
+output: 
+  html_notebook:
+    theme: readable
+    fig_width: 8
+    toc: true
+    toc_float: true
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(readr)
+library(tidyverse)
+library(resample)
+library(timeDate)
+library(lubridate)
+library(boot)
+library(stringr)
+
+theme_set(theme_bw())
+```
+
+## O cenário
+
+Os dados são uma amostra sobre avaliação de filmes disponíveis no MovieLens. A métrica de interesse é a proporção de usuários que avaliam um filme no fim de semana e durante a semana. A estatística que nos interessa é a diferença entre a proporção de avaliações dos usuários nos filmes dos gêneros Sic-Fi e Horror, em dois grupos de dias da semana, um do meio da semana (entre segunda e sexta) e outro com fim de semana (sábado e domingo).
+O site onde os dados são disponibilizados está disponível no link:
+[MovieLens](http://grouplens.org/datasets/movielens/latest/).
+<br>
+
+### Conhecendo os dados
+
+```{r warning=FALSE, message=FALSE}
+ratings <- read.csv(here::here("/data/ratings.csv")) %>% na.omit()
+movies <- read.csv(here::here("/data/movies.csv")) %>% na.omit() 
+data <- merge(ratings, movies,  by='movieId')
+
+data <- data %>% 
+  mutate(date = 
+            as.Date(as.POSIXct(timestamp, origin="1970-01-01")),
+         is_weekend = isWeekend(date)
+         ) %>%
+  select(-timestamp)
+
+group1 = "Horror"
+group2 = "Sci-Fi"
+
+data <- data %>% 
+    filter(genres %in% c(group1, group2))
+
+glimpse(data)
+```
+
+Os dados estão distribuídos nas seguintes colunas:
+
+* `userId`: Identificador do usuário;
+* `movieId`: Identificador do filme;
+* `rating`: A avaliação dada por um usuário a um filme.
+* `title`: O título do filme;
+* `genres`: Os gêneros do filme;
+* `date`: As datas;
+* `is_weekend`: Se a data é um fim de semana (Sábado ou Domingo).
+
+<br>
+
+#### Proporção da amostra
+
+```{r warning=FALSE, message=FALSE}
+data <- merge(data, data %>% select(genres, is_weekend, rating, date) %>% group_by(date) %>% summarise(cont_ratings = n()),  by='date')
+
+data %>%
+    ggplot() + 
+    aes(x = reorder(genres, cont_ratings, NROW),
+        fill = is_weekend) + 
+    geom_bar() + 
+    labs(
+        x = "Gêneros", 
+        y = "Quantidade de avaliações", 
+        fill = "É final de semana?"
+    )
+
+```
+
+## Pergunta
+
+A pergunta é: dada essa amostra, podemos inferir que há uma diferença na taxa de avaliações dadas também *na população de onde saiu essa amostra?*
+
+### Usando Testes de hipótese e p-valores
+
+```{r warning=FALSE, message=FALSE, include=TRUE}
+# A diferença na amostra, que queremos comparar com o modelo nulo
+d = data %>% 
+    group_by(is_weekend) %>% 
+    summarise(ct = sum(cont_ratings) / n())
+m1 = d %>% filter(!is_weekend) %>% pull(ct)
+m2 = d %>% filter(is_weekend) %>% pull(ct)
+
+diferenca_amostral = m1 - m2
+
+# Permutações para calcular o que acontece no modelo nulo
+permutacoes = replicate(10000, 
+          {
+              d = data %>% 
+                  mutate(version_shuffled = sample(is_weekend, n())) %>% 
+                  group_by(version_shuffled) %>% 
+                  summarise(ct = sum(cont_ratings) / n())
+              m1 = d %>% filter(!version_shuffled) %>% pull(ct)
+              m2 = d %>% filter(version_shuffled) %>% pull(ct)
+              m1 - m2
+          })
+```
+
+#### Exibindo resultados
+
+```{r}
+tibble(diferenca = permutacoes) %>% 
+  ggplot(aes(x = diferenca)) + 
+  geom_histogram(bins = 30) + 
+  geom_vline(xintercept = diferenca_amostral, size = 2, color = "orange")
+```
+
+#### P-valor
+
+P-valor é a probabilidade de se obter uma estatística de teste igual ou mais extrema que aquela observada em uma amostra, sob a hipótese nula. Por exemplo, em testes de hipótese, pode-se rejeitar a hipótese nula a 5% caso o valor-p seja menor que 5%. Assim, uma outra interpretação para o valor-p, é que este é menor nível de significância com que se rejeitaria a hipótese nula. Em termos gerais, um valor-p pequeno significa que a probabilidade de obter um valor da estatística de teste como o observado é muito improvável, levando assim à rejeição da hipótese nula. [(Fonte)](https://pt.wikipedia.org/wiki/Valor-p)
+
+```{r warning=FALSE, message=FALSE}
+prop = function(x){
+    sum(x)/NROW(x)
+}
+data %>% 
+    resample::permutationTest2(statistic = prop(cont_ratings), 
+                     treatment = is_weekend)
+```
+
+Obtendo P-valor igual a 0.0002 e sendo este valor menor que 0.05, pode-se rejeitar a nossa hipótese nula e concluindo que **não é possível inferir que há uma diferença na taxa de avaliações dadas também na população de onde saiu essa amostra**.
