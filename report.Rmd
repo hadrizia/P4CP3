@@ -1,0 +1,292 @@
+---
+title: "Inferência: foco em diferenças entre avaliações de filmes"
+author: "Hadrizia Santos"
+date: "21 de julho de 2018"
+output: html_notebook
+---
+
+Este relatório tem o objetivo de fazer inferências com foco na diferença entre populações. Neste caso, os dados são sobre os dados de filmes disponíveis no MovieLens.
+
+## Importando bibliotecas
+
+```{r warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(readr)
+library(tidyverse)
+library(resample)
+library(timeDate)
+library(lubridate)
+library(stringr)
+
+theme_set(theme_bw())
+```
+
+## Importando e conhecendo os dados
+
+```{r warning=FALSE, message=FALSE}
+ratings <- read.csv(here::here("/data/ratings.csv")) %>% na.omit()
+movies <- read.csv(here::here("/data/movies.csv")) %>% na.omit() 
+data <- merge(ratings, movies,  by='movieId')
+
+
+data <- data %>% 
+  mutate(date = 
+            as.Date(as.POSIXct(timestamp, origin="1970-01-01")),
+         is_weekend = isWeekend(date)
+         ) %>%
+  select(-timestamp)
+
+colnames(data)
+```
+
+Os dados estão distribuídos nas seguintes colunas:
+
+* `userId`: Identificador do usuário;
+* `movieId`: Identificador do filme;
+* `rating`: A avaliação dada por um usuário a um filme.
+* `title`: O título do filme;
+* `genres`: Os gêneros do filme;
+* `date`: As datas;
+* `is_weekend`: Se a data é um fim de semana (Sábado ou Domingo).
+
+## Perguntas
+
+### 1. Há diferenças significativas entre as avaliações gêneros Sci-Fi e Horror durante a semana e o fim de semana?
+
+#### Sci-Fi
+
+```{r}
+scifi_data <- data %>% filter(str_detect(genres, regex('Sci-Fi', ignore_case = TRUE)))
+
+scifi_data %>% group_by(is_weekend) %>% 
+  ggplot(aes(x = is_weekend, 
+             y = rating,
+             fill=is_weekend)) + 
+  geom_boxplot() +
+  ggtitle("Avaliações do gênero Sci-Fi na semana e no FDS") + 
+  labs(x = "É FDS?", y = 'Avaliação') +
+  ylim(0,5) +
+  theme(legend.position="none") 
+```
+
+**Inferência com duas amostras:**
+
+```{r warning=FALSE, error=FALSE}
+median.week_day = scifi_data %>%  
+  filter(!is_weekend) %>% 
+  bootstrap(mean(rating), 
+            R = 2000) %>% 
+    CI.percentile(probs = c(.025, .975))
+median.week_day
+
+median.weekend = scifi_data %>% 
+  filter(is_weekend) %>% 
+  bootstrap(mean(rating), 
+            R = 2000) %>% 
+    CI.percentile(probs = c(.025, .975))
+median.weekend
+
+df = data.frame(rbind(median.week_day, 
+                      median.weekend))
+df$medida = c('Avaliações de Sci-Fi em dia de semana', 'Avaliações de Sci-Fi em fim de semana')
+
+df %>% 
+  ggplot(aes(x = medida, ymin = X2.5., ymax = X97.5.)) + 
+  geom_errorbar(width = .2) + 
+  labs(x = "", y = 'Média das avaliações')
+```
+ 
+  A partir do gráfico acima, é possível afirmar que as avaliações do gênero Sci-Fi são, em média, maiores que durante a semana.
+  
+##### Horror
+
+```{r}
+horror_data <- data %>% filter(str_detect(genres, regex('Horror', ignore_case = TRUE)))
+
+horror_data %>% group_by(is_weekend) %>%
+  ggplot(aes(x = is_weekend, 
+             y = rating,
+             fill=is_weekend)) + 
+  geom_boxplot() +
+  ggtitle("Avaliações do gênero Sci-Fi na semana e no FDS") + 
+  labs(x = "É FDS?", y = 'Avaliação') +
+  ylim(0,5) +
+  theme(legend.position="none") 
+```
+
+```{r warning=FALSE, error=FALSE}
+median.week_day = horror_data %>%
+  filter(!is_weekend) %>% 
+  bootstrap(mean(rating), 
+            R = 2000) %>% 
+    CI.percentile(probs = c(.025, .975))
+median.week_day
+
+median.weekend = horror_data %>% 
+  filter(is_weekend) %>% 
+  bootstrap(mean(rating), 
+            R = 2000) %>% 
+    CI.percentile(probs = c(.025, .975))
+median.weekend
+
+df = data.frame(rbind(median.week_day, 
+                      median.weekend))
+df$medida = c('Avaliações de Horror em dia de semana', 'Avaliações de Horror em fim de semana')
+
+df %>% 
+  ggplot(aes(x = medida, ymin = X2.5., ymax = X97.5.)) + 
+  geom_errorbar(width = .2) + 
+  labs(x = "", y = 'Média das avaliações')
+```
+
+A partir do gráfico acima, percebe-se que as avaliações do gênero Horror são, em média, maiores durante a semana.
+
+### 2. E no fim de semana, as diferenças de avaliações entre os gêneros Sci-Fi e Horror é grande?
+
+**Diferenças não pareadas**
+
+```{r}
+b1 = scifi_data %>% 
+  filter(is_weekend) %>%
+  bootstrap(mean(rating))
+
+mean_scifi = b1 %>% 
+  CI.percentile(probs = c(.025, .975))
+
+b2 = horror_data %>% 
+  filter(is_weekend) %>%
+  bootstrap(mean(rating))
+
+mean_horror = b2 %>% 
+  CI.percentile(probs = c(.025, .975))
+
+df.median = data.frame(rbind(mean_scifi, 
+                             mean_horror))
+df.median$medida = c("Sci-Fi", "Horror")
+
+df.median %>% 
+  ggplot(aes(x = medida, ymin = X2.5., ymax = X97.5.)) + 
+  geom_errorbar(width = .2) + labs(x = "Gêneros", y = "Média das avaliações durante o FDS")
+```
+
+No geral, o gráficos acima mostra que, nos finais de semana, os usuários avaliam melhor os filmes do gênero SciFi do que os do gênero Horror.
+
+### 3.Há diferenças significativas entre as avaliações dos filmes Meninas Malvadas e As branquelas durante a semana e no fim de semana?
+
+#### Meninas Malvadas
+
+```{r}
+meangirls_data <- data %>% filter(str_detect(title, regex('^Mean Girls', ignore_case = TRUE)))
+
+meangirls_data %>% group_by(is_weekend) %>% 
+  ggplot(aes(x = is_weekend, 
+             y = rating,
+             fill=is_weekend)) + 
+  geom_boxplot() +
+  ggtitle("Avaliações do filme Meninas Malvadas na semana e no FDS") + 
+  labs(x = "É FDS?", y = 'Avaliação') +
+  ylim(0,5) +
+  theme(legend.position="none") 
+```
+
+```{r}
+median.week_day = meangirls_data %>%
+  filter(!is_weekend) %>% 
+  bootstrap(median(rating), 
+            R = 2000) %>% 
+    CI.percentile(probs = c(.025, .975))
+median.week_day
+
+median.weekend = meangirls_data %>% 
+  filter(is_weekend) %>% 
+  bootstrap(median(rating), 
+            R = 2000) %>% 
+    CI.percentile(probs = c(.025, .975))
+median.weekend
+
+df = data.frame(rbind(median.week_day, 
+                      median.weekend))
+df$medida = c('Avaliações em dia de semana', 'Avaliações em fim de semana')
+
+df %>% 
+  ggplot(aes(x = medida, ymin = X2.5., ymax = X97.5.)) + 
+  geom_errorbar(width = .2) + 
+  labs(x = "", y = 'Mediana das avaliações')
+```
+
+Pelo gráfico acima nota-se que, as avaliações durante a semana chegam a ter notas maiores mas também menores, com um intervalo grande entre as notas, de 2.5 a 4.5. Já no fim de semana, esse valor varia entre 3 e 4.
+
+#### As branquelas
+
+```{r}
+chicks_data <- data %>% filter(str_detect(title, regex('^White Chicks', ignore_case = TRUE)))
+
+chicks_data %>% group_by(is_weekend) %>% 
+  ggplot(aes(x = is_weekend, 
+             y = rating,
+             fill=is_weekend)) + 
+  geom_boxplot() +
+  ggtitle("Avaliações do filme As branquelas na semana e no FDS") + 
+  labs(x = "É FDS?", y = 'Avaliação') +
+  ylim(0,5) +
+  theme(legend.position="none") 
+```
+
+```{r}
+median.week_day = chicks_data %>%
+  filter(!is_weekend) %>% 
+  bootstrap(median(rating), 
+            R = 2000) %>% 
+    CI.percentile(probs = c(.025, .975))
+median.week_day
+
+median.weekend = chicks_data %>% 
+  filter(is_weekend) %>% 
+  bootstrap(median(rating), 
+            R = 2000) %>% 
+    CI.percentile(probs = c(.025, .975))
+median.weekend
+
+df = data.frame(rbind(median.week_day, 
+                      median.weekend))
+df$medida = c('Avaliações em dia de semana', 'Avaliações em fim de semana')
+
+df %>% 
+  ggplot(aes(x = medida, ymin = X2.5., ymax = X97.5.)) + 
+  geom_errorbar(width = .2) + 
+  labs(x = "", y = 'Mediana das avaliações')
+```
+
+Pode-se perceber do gráfico acima que nos finais de semanas, as menores notas dadas ao filme As branquelas são ainda maiores que as menores notas dadas duranre a semana.
+
+### 4. Durante o fds, os filmes possuem acima citados possuem diferença de avaliação significativa? 
+
+```{r}
+b1 = meangirls_data %>% 
+  filter(is_weekend) %>%
+  bootstrap(mean(rating))
+
+mean_girls = b1 %>% 
+  CI.percentile(probs = c(.025, .975))
+
+b2 = chicks_data %>% 
+  filter(is_weekend) %>%
+  bootstrap(mean(rating))
+
+mean_chicks = b2 %>% 
+  CI.percentile(probs = c(.025, .975))
+
+df.median = data.frame(rbind(mean_girls, 
+                             mean_chicks))
+df.median$medida = c("Meninas Malvadas", "As branquelas")
+
+df.median %>% 
+  ggplot(aes(x = medida, ymin = X2.5., ymax = X97.5.)) + 
+  geom_errorbar(width = .2) + labs(x = "Filmes", y = "Média das avaliações durante o FDS")
+```
+
+O gráfico acima nos possibilita notar que nos finais de semana, o filme Meninas Malvadas possui melhores avaliações que o filme As branquelas.
+
+
